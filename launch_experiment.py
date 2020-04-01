@@ -18,7 +18,7 @@ from rlkit.torch.sac.agent import PEARLAgent
 from rlkit.launchers.launcher_util import setup_logger
 import rlkit.torch.pytorch_util as ptu
 from configs.default import default_config
-
+from configs.short import short_config
 
 def experiment(variant):
 
@@ -128,7 +128,7 @@ def deep_update_dict(fr, to):
 @click.option('--debug', is_flag=True, default=False)
 def main(config, gpu, docker, debug):
 
-    variant = default_config
+    variant = short_config
     if config:
         with open(os.path.join(config)) as f:
             exp_params = json.load(f)
@@ -139,4 +139,3 @@ def main(config, gpu, docker, debug):
 
 if __name__ == "__main__":
     main()
-

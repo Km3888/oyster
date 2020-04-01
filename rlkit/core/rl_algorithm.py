@@ -7,6 +7,7 @@ import numpy as np
 
 from rlkit.core import logger, eval_util
 from rlkit.data_management.env_replay_buffer import MultiTaskReplayBuffer
+from rlkit.data_management.simple_replay_buffer import SimpleReplayBuffer
 from rlkit.data_management.path_builder import PathBuilder
 from rlkit.samplers.in_place import InPlacePathSampler
 from rlkit.torch import pytorch_util as ptu
@@ -30,6 +31,7 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
             num_evals=10,
             num_steps_per_eval=1000,
             batch_size=1024,
+            low_batch_size=2048, #TODO: Tune this batch size
             embedding_batch_size=1024,
             embedding_mini_batch_size=1024,
             max_path_length=1000,
@@ -46,6 +48,7 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
             render_eval_paths=False,
             dump_eval_paths=False,
             plotter=None,
+            use_goals=False
     ):
         """
         :param env: training env
@@ -57,6 +60,8 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         """
         self.env = env
         self.agent = agent
+        self.use_goals=use_goals
+        assert(agent.use_goals==self.use_goals)
         self.exploration_agent = agent # Can potentially use a different policy purely for exploration rather than also solving tasks, currently not being used
         self.train_tasks = train_tasks
         self.eval_tasks = eval_tasks
@@ -73,6 +78,7 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         self.batch_size = batch_size
         self.embedding_batch_size = embedding_batch_size
         self.embedding_mini_batch_size = embedding_mini_batch_size
+        self.low_batch_size=low_batch_size
         self.max_path_length = max_path_length
         self.discount = discount
         self.replay_buffer_size = replay_buffer_size
@@ -90,6 +96,10 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         self.dump_eval_paths = dump_eval_paths
         self.plotter = plotter
 
+        obs_dim = int(np.prod(env.observation_space.shape))
+        action_dim = int(np.prod(env.action_space.shape))
+
+
         self.sampler = InPlacePathSampler(
             env=env,
             policy=agent,
@@ -99,17 +109,38 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         # separate replay buffers for
         # - training RL update
         # - training encoder update
-        self.replay_buffer = MultiTaskReplayBuffer(
-                self.replay_buffer_size,
-                env,
-                self.train_tasks,
-            )
 
         self.enc_replay_buffer = MultiTaskReplayBuffer(
                 self.replay_buffer_size,
                 env,
                 self.train_tasks,
         )
+        if self.use_goals:
+            self.high_buffer=MultiTaskReplayBuffer(
+                self.replay_buffer_size,
+                env,
+                self.train_tasks
+            )
+            #Hacky method for changing the obs and action dimensions for the internal
+            #buffers since they're not the same as the original environment
+            internal_buffers=dict([(idx, SimpleReplayBuffer(
+            max_replay_buffer_size=self.replay_buffer_size,
+            observation_dim=obs_dim,
+            action_dim=obs_dim,
+        )) for idx in self.train_tasks])
+            self.high_buffer.task_buffers=internal_buffers
+
+            self.low_buffer = SimpleReplayBuffer(
+                max_replay_buffer_size=replay_buffer_size,
+                observation_dim=2*obs_dim,
+                action_dim=action_dim,
+            )
+        else:
+            self.replay_buffer = MultiTaskReplayBuffer(
+                self.replay_buffer_size,
+                env,
+                self.train_tasks,
+            )
 
         self._n_env_steps_total = 0
         self._n_train_steps_total = 0
@@ -159,6 +190,8 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
                 print('collecting initial pool of data for train and eval')
                 # temp for evaluating
                 for idx in self.train_tasks:
+                    print('idx:',idx)
+                    print('num initial steps:',self.num_initial_steps)
                     self.task_idx = idx
                     self.env.reset_task(idx)
                     self.collect_data(self.num_initial_steps, 1, np.inf)
@@ -168,20 +201,23 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
                 self.task_idx = idx
                 self.env.reset_task(idx)
                 self.enc_replay_buffer.task_buffers[idx].clear()
-
                 # collect some trajectories with z ~ prior
                 if self.num_steps_prior > 0:
                     self.collect_data(self.num_steps_prior, 1, np.inf)
+                    #NOTE: the second argument to self.collect_data is how often you reset the context
                 # collect some trajectories with z ~ posterior
                 if self.num_steps_posterior > 0:
                     self.collect_data(self.num_steps_posterior, 1, self.update_post_train)
                 # even if encoder is trained only on samples from the prior, the policy needs to learn to handle z ~ posterior
                 if self.num_extra_rl_steps_posterior > 0:
                     self.collect_data(self.num_extra_rl_steps_posterior, 1, self.update_post_train, add_to_enc_buffer=False)
+            #So self.task_idx always ONE number and is used for data collection,
+            #but during the actual training steps, you can have multiple indices
+            #used at once
 
             # Sample train tasks and compute gradient updates on parameters.
-            for train_step in range(self.num_train_steps_per_itr):
-                indices = np.random.choice(self.train_tasks, self.meta_batch)
+            for train_step in range(self.num_train_steps_per_itr):## DEFAULT: num_train_steps_per_itr=2000
+                indices = np.random.choice(self.train_tasks, self.meta_batch) ##DEFAULT:self.meta_batch=16
                 self._do_training(indices)
                 self._n_train_steps_total += 1
             gt.stamp('train')
@@ -194,12 +230,19 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
 
             self._end_epoch()
 
+    def _update_low_level(self):
+        """
+        Update the low-level policy
+        """
+        pass
+
     def pretrain(self):
         """
         Do anything before the main training phase.
         """
         pass
 
+        #Or just sample random goals until the low-level policy starts to converge??
     def collect_data(self, num_samples, resample_z_rate, update_posterior_rate, add_to_enc_buffer=True):
         '''
         get trajectories from current env in batch mode with given policy
@@ -278,7 +321,6 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
     def _can_evaluate(self):
         """
         One annoying thing about the logger table is that the keys at each
-        iteration need to be the exact same. So unless you can compute
         everything, skip evaluation.
 
         A common example for why you might want to skip evaluation is that at
@@ -307,6 +349,8 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         self._exploration_paths = []
         self._do_train_time = 0
         logger.push_prefix('Iteration #%d | ' % epoch)
+        # iteration need to be the exact same. So unless you can compute
+
 
     def _end_epoch(self):
         logger.log("Epoch Duration: {0}".format(
@@ -319,7 +363,7 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
     def get_epoch_snapshot(self, epoch):
         data_to_save = dict(
             epoch=epoch,
-            exploration_policy=self.exploration_policy,
+            #exploration_policy=self.exploration_policy,
         )
         if self.save_environment:
             data_to_save['env'] = self.training_env
@@ -367,6 +411,7 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
                 p['rewards'] = sparse_rewards
 
         goal = self.env._goal
+        #TODO Make sure this isn't a problem
         for path in paths:
             path['goal'] = goal # goal
 

@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/gpfsnyu/home/km3888/oyster/launch_experiment.py", line 14, in <module>
+    from rlkit.torch.sac.policies import TanhGaussianPolicy
+  File "/gpfsnyu/home/km3888/oyster/rlkit/torch/sac/policies.py", line 16, in <module>
+    class TanhGaussianPolicy(Mlp, ExplorationPolicy):
+  File "/gpfsnyu/home/km3888/oyster/rlkit/torch/sac/policies.py", line 71, in TanhGaussianPolicy
+    def get_actions(self, obs, deterministic=False):
+TypeError: 'no_grad' object is not callable

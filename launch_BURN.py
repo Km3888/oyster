@@ -14,11 +14,13 @@ from rlkit.envs.wrappers import NormalizedBoxEnv
 from rlkit.torch.sac.policies import TanhGaussianPolicy
 from rlkit.torch.networks import FlattenMlp, MlpEncoder, RecurrentEncoder
 from rlkit.torch.sac.sac import PEARLSoftActorCritic
+from rlkit.torch.sac.burn_sac import BURNSoftActorCritic
 from rlkit.torch.sac.agent import PEARLAgent
+from rlkit.torch.sac.BURNAgent import BURNAgent
 from rlkit.launchers.launcher_util import setup_logger
 import rlkit.torch.pytorch_util as ptu
 from configs.default import default_config
-from configs.short import short_config
+from configs.short_burn import short_config
 
 def experiment(variant):
 
@@ -43,8 +45,19 @@ def experiment(variant):
         output_size=context_encoder_output_dim,
     )
 
-    #TODO Get the correct sizes for these q nets
-    high_qs=[FlattenMlp(
+    #low Qs first and then high Qs
+    q_list=[
+        [FlattenMlp(
+        hidden_sizes=[net_size, net_size, net_size],
+        input_size=2*obs_dim + action_dim,
+        output_size=1,
+    ),
+        FlattenMlp(
+            hidden_sizes=[net_size, net_size, net_size],
+            input_size=2*obs_dim + action_dim,
+            output_size=1,
+        )]
+        ,[FlattenMlp(
         hidden_sizes=[net_size, net_size, net_size],
         input_size=obs_dim + action_dim + latent_dim,
         output_size=1,
@@ -53,55 +66,65 @@ def experiment(variant):
         hidden_sizes=[net_size, net_size, net_size],
         input_size=obs_dim + action_dim + latent_dim,
         output_size=1,
-    )]
-
-    low_qs = [FlattenMlp(
+    )]]
+    #low vf first and then high vf
+    vf_list = [FlattenMlp(
         hidden_sizes=[net_size, net_size, net_size],
-        input_size=obs_dim + action_dim + latent_dim,
+        input_size=2*obs_dim,
         output_size=1,
-    ),
-        FlattenMlp(
-            hidden_sizes=[net_size, net_size, net_size],
-            input_size=obs_dim + action_dim + latent_dim,
-            output_size=1,
-        )]
-
-    vf = FlattenMlp(
+    ),FlattenMlp(
         hidden_sizes=[net_size, net_size, net_size],
         input_size=obs_dim + latent_dim,
         output_size=1,
-    )
-    policy = TanhGaussianPolicy(
-        hidden_sizes=[net_size, net_size, net_size],
+    )]
+
+    #NOTE: Reduced number of hidden layers in h_policy from 3 to 2 (idea being it's not doing as much as the whole policy in PEARL)
+    h_policy = TanhGaussianPolicy(
+        hidden_sizes=[net_size, net_size],
         obs_dim=obs_dim + latent_dim,
         latent_dim=latent_dim,
+        action_dim=obs_dim,
+    )
+    #NOTE: Kept the 3 layers because fuck it it'll get tons of data
+    l_policy=TanhGaussianPolicy(
+        hidden_sizes=[net_size,net_size,net_size,net_size],
+        obs_dim=2*obs_dim,
+        latent_dim=0,
         action_dim=action_dim,
     )
-    agent = PEARLAgent(
+    #TODO Implement BernAgent
+    agent = BURNAgent(
         latent_dim,
         context_encoder,
-        policy,
+        h_policy,
+        l_policy,
+        c=2,
         **variant['algo_params']
     )
-    algorithm = PEARLSoftActorCritic(
+    algorithm = BURNSoftActorCritic(
         env=env,
         train_tasks=list(tasks[:variant['n_train_tasks']]),
         eval_tasks=list(tasks[-variant['n_eval_tasks']:]),
-        nets=[agent, qf1, qf2, vf],
+        nets=[agent, q_list, vf_list],
         latent_dim=latent_dim,
         **variant['algo_params']
     )
 
     # optionally load pre-trained weights
+    #TODO Make sure weights are properly saved
     if variant['path_to_weights'] is not None:
         path = variant['path_to_weights']
         context_encoder.load_state_dict(torch.load(os.path.join(path, 'context_encoder.pth')))
-        qf1.load_state_dict(torch.load(os.path.join(path, 'qf1.pth')))
-        qf2.load_state_dict(torch.load(os.path.join(path, 'qf2.pth')))
-        vf.load_state_dict(torch.load(os.path.join(path, 'vf.pth')))
+        q_list[0][0].load_state_dict(torch.load(os.path.join(path, 'l_qf1.pth')))
+        q_list[0][1].load_state_dict(torch.load(os.path.join(path, 'l_qf2.pth')))
+        q_list[1][0].load_state_dict(torch.load(os.path.join(path, 'h_qf1.pth')))
+        q_list[1][1].load_state_dict(torch.load(os.path.join(path, 'h_qf2.pth')))
+        vf_list[0].load_state_dict(torch.load(os.path.join(path, 'l_vf.pth')))
+        vf_list[1].load_state_dict(torch.load(os.path.join(path, 'h_vf.pth')))
         # TODO hacky, revisit after model refactor
         algorithm.networks[-2].load_state_dict(torch.load(os.path.join(path, 'target_vf.pth')))
-        policy.load_state_dict(torch.load(os.path.join(path, 'policy.pth')))
+        h_policy.load_state_dict(torch.load(os.path.join(path, 'h_policy.pth')))
+        l_policy.load_state_dict(torch.load(os.path.join(path, 'l_policy.pth')))
 
     # optional GPU mode
     ptu.set_gpu_mode(variant['util_params']['use_gpu'], variant['util_params']['gpu_id'])
@@ -142,7 +165,8 @@ def deep_update_dict(fr, to):
 @click.option('--debug', is_flag=True, default=False)
 def main(config, gpu, docker, debug):
 
-    variant = default_config
+    variant = short_config
+    print(variant['algo_params'])
     if config:
         with open(os.path.join(config)) as f:
             exp_params = json.load(f)

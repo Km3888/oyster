@@ -4,12 +4,13 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch import nn as nn
+import gtimer as gt
 
 import rlkit.torch.pytorch_util as ptu
 from rlkit.core.eval_util import create_stats_ordered_dict
 from rlkit.core.rl_algorithm import MetaRLAlgorithm
 
-
+#TODO SPlit these into different files
 class PEARLSoftActorCritic(MetaRLAlgorithm):
     def __init__(
             self,
@@ -43,6 +44,7 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
             agent=nets[0],
             train_tasks=train_tasks,
             eval_tasks=eval_tasks,
+            use_goals=False,
             **kwargs
         )
 
@@ -128,6 +130,7 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
         unpacked = [torch.cat(x, dim=0) for x in unpacked]
         return unpacked
 
+    #TUNE: Maybe try doing high-level context
     def sample_context(self, indices):
         ''' sample batch of context from a list of tasks from the replay buffer '''
         # make method work given a single task index
@@ -158,6 +161,7 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
         # zero out context and hidden encoder state
         self.agent.clear_z(num_tasks=len(indices))
 
+
         # do this in a loop so we can truncate backprop in the recurrent encoder
         for i in range(num_updates):
             context = context_batch[:, i * mb_size: i * mb_size + mb_size, :]
@@ -166,11 +170,14 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
             # stop backprop
             self.agent.detach_z()
 
+
     def _min_q(self, obs, actions, task_z):
         q1 = self.qf1(obs, actions, task_z.detach())
         q2 = self.qf2(obs, actions, task_z.detach())
         min_q = torch.min(q1, q2)
         return min_q
+
+
 
     def _update_target_network(self):
         ptu.soft_update_from_to(self.vf, self.target_vf, self.soft_target_tau)
@@ -180,8 +187,8 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
         num_tasks = len(indices)
 
         # data is (task, batch, feat)
-        obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
 
+        obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
         # run inference in networks
         policy_outputs, task_z = self.agent(obs, context)
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]

@@ -2,8 +2,8 @@
 # all experiments should modify these settings only as needed
 default_config = dict(
     env_name='cheetah-dir',
-    n_train_tasks=2,
-    n_eval_tasks=2,
+    n_train_tasks=1,
+    n_eval_tasks=1,
     latent_size=5, # dimension of the latent context vector
     net_size=300, # number of units per FC layer in each network
     path_to_weights=None, # path to pre-trained weights to load into networks
@@ -17,6 +17,7 @@ default_config = dict(
         num_initial_steps=2000, # number of transitions collected per task before training
         num_tasks_sample=5, # number of randomly sampled tasks to collect data for each iteration
         num_steps_prior=400, # number of transitions to collect per task with z ~ prior
+        #As in like each of these is how many steps per time that you sample the task
         num_steps_posterior=0, # number of transitions to collect per task with z ~ posterior
         num_extra_rl_steps_posterior=400, # number of additional transitions to collect per task with z ~ posterior that are only used to train the policy and NOT the encoder
         num_train_steps_per_itr=2000, # number of meta-gradient steps taken per iteration
@@ -44,7 +45,7 @@ default_config = dict(
     ),
     util_params=dict(
         base_log_dir='output',
-        use_gpu=True,
+        use_gpu=False,
         gpu_id=0,
         debug=False, # debugging triggers printing and writes logs to debug directory
         docker=False, # TODO docker is not yet supported

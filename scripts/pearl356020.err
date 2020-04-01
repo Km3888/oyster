@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/gpfsnyu/home/km3888/oyster/launch_experiment.py", line 12, in <module>
+    from rlkit.envs import ENVS
+  File "/gpfsnyu/home/km3888/oyster/rlkit/envs/__init__.py", line 26, in <module>
+    importlib.import_module('rlkit.envs.' + module)
+  File "/gpfsnyu/packages/anaconda3/5.2.0/lib/python3.6/importlib/__init__.py", line 126, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "/gpfsnyu/home/km3888/oyster/rlkit/envs/ant_goal.py", line 3, in <module>
+    from rlkit.envs.ant_multitask_base import MultitaskAntEnv
+  File "/gpfsnyu/home/km3888/oyster/rlkit/envs/ant_multitask_base.py", line 3, in <module>
+    from rlkit.envs.ant import AntEnv
+  File "/gpfsnyu/home/km3888/oyster/rlkit/envs/ant.py", line 3, in <module>
+    from .mujoco_env import MujocoEnv
+  File "/gpfsnyu/home/km3888/oyster/rlkit/envs/mujoco_env.py", line 4, in <module>
+    import mujoco_py
+ModuleNotFoundError: No module named 'mujoco_py'

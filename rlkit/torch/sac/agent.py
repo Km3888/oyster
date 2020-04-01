@@ -6,7 +6,6 @@ import torch.nn.functional as F
 
 import rlkit.torch.pytorch_util as ptu
 
-
 def _product_of_gaussians(mus, sigmas_squared):
     '''
     compute mu, sigma of product of gaussians
@@ -39,7 +38,6 @@ def _canonical_to_natural(mu, sigma_squared):
     n2 = -0.5 * 1 / sigma_squared
     return n1, n2
 
-
 class PEARLAgent(nn.Module):
 
     def __init__(self,
@@ -50,6 +48,7 @@ class PEARLAgent(nn.Module):
     ):
         super().__init__()
         self.latent_dim = latent_dim
+        self.use_goals=False
 
         self.context_encoder = context_encoder
         self.policy = policy
@@ -66,6 +65,7 @@ class PEARLAgent(nn.Module):
         self.register_buffer('z_vars', torch.zeros(1, latent_dim))
 
         self.clear_z()
+        self.sample_goal=False
 
     def clear_z(self, num_tasks=1):
         '''
@@ -184,7 +184,3 @@ class PEARLAgent(nn.Module):
     @property
     def networks(self):
         return [self.context_encoder, self.policy]
-
-
-
-
